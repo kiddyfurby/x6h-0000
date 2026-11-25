@@ -15,7 +15,13 @@ export declare enum Command {
     Feed = 161,
     Speed = 189,
     Energy = 175,
-    Bitmap = 162
+    Bitmap = 162,
+    /**
+     * Device status / flow control (printer -> host).
+     * Payload 0x10 = RX buffer full (pause), 0x00 = ready (resume).
+     * Used by the X6 / X6h family.
+     */
+    DeviceStatus = 174
 }
 /**
  * Enumeration of command types.

@@ -459,6 +459,11 @@ It supports multi-line text.</textarea>
             <button id="retractBtn" class="button warning" disabled style="margin-top: 10px;">Retract Paper</button>
           </div>
         </div>
+
+        <div class="form-group">
+          <label>Lift up and tear (feeds paper to tear line):</label>
+          <button id="tearBtn" class="button success" disabled>Lift Up &amp; Tear</button>
+        </div>
       </div>
 
       <div class="tab-content" id="settings-tab">
@@ -515,6 +520,7 @@ It supports multi-line text.</textarea>
     const printImageBtn = document.getElementById('printImageBtn');
     const feedBtn = document.getElementById('feedBtn');
     const retractBtn = document.getElementById('retractBtn');
+    const tearBtn = document.getElementById('tearBtn');
     const setSpeedBtn = document.getElementById('setSpeedBtn');
     const setEnergyBtn = document.getElementById('setEnergyBtn');
     const finishBtn = document.getElementById('finishBtn');
@@ -716,6 +722,17 @@ It supports multi-line text.</textarea>
       }
     });
 
+    // Lift up and tear
+    tearBtn.addEventListener('click', async () => {
+      try {
+        updateLog('Lifting paper up to tear line...');
+        await printer.liftUpAndTear();
+        updateLog('Paper lifted — ready to tear');
+      } catch (error) {
+        updateLog(`Tear error: ${error.message}`);
+      }
+    });
+
     // Set print speed
     setSpeedBtn.addEventListener('click', async () => {
       try {
@@ -816,6 +833,7 @@ It supports multi-line text.</textarea>
       printImageBtn.disabled = !connected;
       feedBtn.disabled = !connected;
       retractBtn.disabled = !connected;
+      tearBtn.disabled = !connected;
       setSpeedBtn.disabled = !connected;
       setEnergyBtn.disabled = !connected;
       finishBtn.disabled = !connected;

@@ -41,3 +41,19 @@ export const DEF_ENERGY = 24000;
  * Default finish feed lines.
  */
 export const DEF_FINISH_FEED = 100;
+
+/**
+ * Default feed lines for the "lift up and tear" action (~15 mm at 203 dpi).
+ */
+export const DEF_TEAR_FEED = 120;
+
+/**
+ * Default settle time (ms) to keep the link open after the final feed on
+ * X6 / X6h printers so buffered output can drain.
+ */
+export const DEF_SETTLE_MS = 5000;
+
+/**
+ * Default delay (ms) between scanline writes on X6 / X6h printers.
+ */
+export const DEF_INTER_PACKET_DELAY_MS = 15;

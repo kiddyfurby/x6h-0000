@@ -17,6 +17,12 @@ export enum Command {
   Speed = 0xbd,
   Energy = 0xaf,
   Bitmap = 0xa2,
+  /**
+   * Device status / flow control (printer -> host).
+   * Payload 0x10 = RX buffer full (pause), 0x00 = ready (resume).
+   * Used by the X6 / X6h family.
+   */
+  DeviceStatus = 0xae,
 }
 
 /**

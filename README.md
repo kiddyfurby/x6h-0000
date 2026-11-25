@@ -1,8 +1,18 @@
-# Cat Printer SDK
+# Cat Printer SDK (X6h fork)
 
-The Cat Printer SDK is a powerful JavaScript library that brings the convenience of Bluetooth connectivity to your web applications. Connect to affordable portable mini thermal printers (commonly known as Cat Printers) to print text, images, and more programmatically without using the vendor's mobile app.
+> **This is a fork of [`opuu/cat-printer`](https://github.com/opuu/cat-printer) that adds support for the X6 / X6h "cat printer" family** (e.g. the `x6h-0000` model). The upstream library only tested GB01/02/03, GT01, YT01, MX05/06/08/10 and X5; the X6h speaks a different GATT flow and needs flow control, a blank lead row, a 2-byte energy payload and a drain delay. All of that is handled here.
+>
+> Upstream remote is configured as `upstream`; this fork's changes live on top of it.
 
-> ⚠️ **Warning:** This library has been tested only on select printer models. We highly recommend trying the [demo](https://opuu.github.io/cat-printer/) to verify compatibility before deploying in production.
+## What's different from upstream
+
+- **Auto-detects X6 / X6h** from the advertised BLE name (`X6h-`, `x6h-`, `X6H-`, `SC05-`), or force with `model: 'x6'`.
+- **Flow control** via the `0xAE` device-status characteristic (pauses on buffer-full `0x10`, resumes on ready `0x00`).
+- **Blank lead scanline** prepended before bitmap rows (X6h prints artifacts otherwise).
+- **2-byte (u16 LE) energy payload** for X6h instead of the 4-byte u32 other models use.
+- **Skips the device-state command** on X6h (unsupported).
+- **15 ms inter-packet delay** between scanlines and a **5 s settle delay** before disconnect so the printer drains its buffer.
+- **`liftUpAndTear()`** method + demo button: feeds ~15 mm (120 scanlines at 203 dpi) at a slower speed so the print clears the tear line.
 
 ## Features
 
@@ -104,6 +114,10 @@ new CatPrinter(options?: PrinterOptions)
 | speed      | number  | 32      | Default print speed                     |
 | energy     | number  | 24000   | Default print energy/density            |
 | finishFeed | number  | 100     | Default lines to feed after printing    |
+| tearFeed   | number  | 120     | Scanlines to feed for `liftUpAndTear()` (~15 mm at 203 dpi) |
+| model      | 'auto' \| 'x6' | 'auto' | Force a printer family; `'x6'` targets the X6 / X6h |
+| settleMs   | number  | 5000    | Drain delay (ms) before disconnect on X6 / X6h |
+| interPacketDelayMs | number | 15 | Delay (ms) between scanlines on X6 / X6h |
 
 ### Methods
 
@@ -153,6 +167,9 @@ new CatPrinter(options?: PrinterOptions)
 
 - **finish(feed: number): Promise<void>**  
     Completes printing with a final paper feed.
+
+- **liftUpAndTear(): Promise<void>**  
+    Feeds paper ~15 mm (configurable via `tearFeed`) at a slower speed so the print clears the tear line. Use this instead of an auto-feed after every print.
 
 ### Options Types
 
@@ -240,6 +257,7 @@ We welcome contributions! If you have suggestions, bug reports, or feature reque
 - [x] MX08
 - [x] MX10
 - [x] X5
+- [x] X6 / X6h (auto-detected from `X6h-` / `x6h-` / `X6H-` / `SC05-` names, or force with `model: 'x6'`)
 
 ## Inspired By
 
@@ -249,3 +267,8 @@ We welcome contributions! If you have suggestions, bug reports, or feature reque
 ## License
 
 Distributed under the AGPL-3.0 license. See the LICENSE file for details.
+
+## Credits
+
+- Upstream: [`opuu/cat-printer`](https://github.com/opuu/cat-printer) by Obaydur Rahman.
+- X6 / X6h protocol reference: [parzivail's BLE thermal printer notes](https://parzivail.github.io/ble-thermal-printer/), [nazarovmi/tinyprint-x6h](https://github.com/nazarovmi/tinyprint-x6h), [cicloid/printable](https://github.com/cicloid/printable).

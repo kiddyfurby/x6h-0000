@@ -11,6 +11,9 @@ import {
   DEF_SPEED,
   DEF_ENERGY,
   DEF_FINISH_FEED,
+  DEF_TEAR_FEED,
+  DEF_SETTLE_MS,
+  DEF_INTER_PACKET_DELAY_MS,
 } from './constants';
 import { Command, CommandType } from './enums';
 import {
@@ -46,6 +49,18 @@ export class CatPrinter {
   };
   private options: PrinterOptions;
   private modelName: string = '';
+  /**
+   * True when the connected device belongs to the X6 / X6h family, which
+   * needs flow control, a blank lead row, a 2-byte energy payload and a
+   * drain delay before disconnect.
+   */
+  private isX6h: boolean = false;
+  /**
+   * Flow-control gate for X6 / X6h. When the printer reports a full RX
+   * buffer, scanline writes wait until a "ready" notification arrives.
+   */
+  private flowPaused: boolean = false;
+  private flowWaiters: Array<() => void> = [];
 
   /**
    * Creates an instance of the CatPrinter.
@@ -57,6 +72,10 @@ export class CatPrinter {
       speed: DEF_SPEED,
       energy: DEF_ENERGY,
       finishFeed: DEF_FINISH_FEED,
+      tearFeed: DEF_TEAR_FEED,
+      model: 'auto',
+      settleMs: DEF_SETTLE_MS,
+      interPacketDelayMs: DEF_INTER_PACKET_DELAY_MS,
       ...options,
     };
   }
@@ -80,6 +99,15 @@ export class CatPrinter {
       this.modelName = this.device.name || '';
       this.log(`Connected to printer model: ${this.modelName}`);
 
+      // Detect the X6 / X6h family. An explicit model option wins; otherwise
+      // match the advertised name prefix (X6h- / x6h- / X6H- / SC05-).
+      if (this.options.model === 'x6') {
+        this.isX6h = true;
+      } else if (this.options.model === 'auto') {
+        this.isX6h = /^(X6h-|x6h-|X6H-|SC05-)/.test(this.modelName);
+      }
+      this.log(`Detected X6/X6h family: ${this.isX6h}`);
+
       if (!this.device.gatt) {
         throw new Error('Bluetooth GATT not available');
       }
@@ -98,8 +126,11 @@ export class CatPrinter {
         this.handleNotification.bind(this)
       );
 
-      // Initialize printer
-      await this.getDeviceState();
+      // Initialize printer. The X6 / X6h family has no device-state command,
+      // so only query it on other models.
+      if (!this.isX6h) {
+        await this.getDeviceState();
+      }
       await this.prepare(this.options.speed!, this.options.energy!);
 
       return this.printerState;
@@ -114,6 +145,13 @@ export class CatPrinter {
    * @returns A Promise that resolves when disconnected.
    */
   async disconnect(): Promise<void> {
+    // X6 / X6h send no completion event; hold the link open briefly so the
+    // printer can drain its buffer before we tear it down.
+    if (this.isX6h && this.options.settleMs && this.options.settleMs > 0) {
+      this.log(`Settling for ${this.options.settleMs}ms before disconnect`);
+      await new Promise(resolve => setTimeout(resolve, this.options.settleMs));
+    }
+
     if (this.rxCharacteristic) {
       try {
         await this.rxCharacteristic.stopNotifications();
@@ -315,12 +353,16 @@ export class CatPrinter {
    * @returns A Promise that resolves when the energy command is sent.
    */
   async setEnergy(energy: number): Promise<void> {
-    const payload = new Uint8Array([
-      energy & 0xff,
-      (energy >> 8) & 0xff,
-      (energy >> 16) & 0xff,
-      (energy >> 24) & 0xff,
-    ]);
+    // The X6 / X6h family takes a 2-byte (u16 LE) energy value; other models
+    // take a 4-byte (u32 LE) value.
+    const payload = this.isX6h
+      ? new Uint8Array([energy & 0xff, (energy >> 8) & 0xff])
+      : new Uint8Array([
+          energy & 0xff,
+          (energy >> 8) & 0xff,
+          (energy >> 16) & 0xff,
+          (energy >> 24) & 0xff,
+        ]);
 
     const command = this.makeCommand(Command.Energy, payload);
     await this.write(command);
@@ -373,6 +415,17 @@ export class CatPrinter {
   }
 
   /**
+   * Lift the paper up to the tear line so it can be torn off.
+   * Feeds `tearFeed` scanlines (~15 mm at 203 dpi) at a slower speed.
+   * @returns A Promise that resolves when the tear feed is sent.
+   */
+  async liftUpAndTear(): Promise<void> {
+    const feed = this.options.tearFeed ?? DEF_TEAR_FEED;
+    await this.setSpeed(8); // Slower speed for clean tear
+    await this.feed(feed);
+  }
+
+  /**
    * Draw a single line of bitmap data to the printer.
    * @param line The bitmap line data as a Uint8Array.
    * @returns A Promise that resolves when the draw command is sent.
@@ -400,15 +453,25 @@ export class CatPrinter {
     const { width, height, data } = bitmap;
     const pitch = Math.ceil(width / 8); // Bytes per line
 
+    // X6 / X6h require a blank lead scanline before the bitmap's own rows.
+    if (this.isX6h) {
+      await this.waitForFlow();
+      await this.draw(new Uint8Array(pitch));
+      await this.interPacketDelay();
+    }
+
     for (let y = 0; y < height; y++) {
       const lineStart = y * pitch;
       const lineEnd = lineStart + pitch;
       const line = data.slice(lineStart, lineEnd);
 
-      // Skip empty lines (all zeros)
+      // Skip empty lines (all zeros) — except on the X6 family we already
+      // emitted an explicit lead row, and skipping the rest is still fine.
       if (line.every(byte => byte === 0)) continue;
 
+      await this.waitForFlow();
       await this.draw(line);
+      await this.interPacketDelay();
     }
   }
 
@@ -480,6 +543,23 @@ export class CatPrinter {
         .map(b => b.toString(16).padStart(2, '0'))
         .join(' ')
     );
+
+    // X6 / X6h flow control: the printer notifies on the device-status
+    // command (0xAE). Payload 0x10 = RX buffer full (pause), 0x00 = ready.
+    if (this.isX6h && data.length >= 7 && data[2] === Command.DeviceStatus) {
+      const status = data[6];
+      if (status === 0x10) {
+        this.flowPaused = true;
+        this.log('Printer buffer full — pausing');
+      } else if (status === 0x00) {
+        this.log('Printer ready — resuming');
+        this.flowPaused = false;
+        const waiters = this.flowWaiters;
+        this.flowWaiters = [];
+        waiters.forEach(resolve => resolve());
+      }
+      return;
+    }
 
     // Handle printer state update
     if (data.length >= 7 && data[2] === Command.GetDeviceState) {
@@ -719,6 +799,26 @@ export class CatPrinter {
       data: bitmap,
       dataurl: dataurl,
     };
+  }
+
+  /**
+   * Wait until the printer signals it is ready (X6 / X6h flow control).
+   * Resolves immediately when the printer is not paused or not an X6.
+   */
+  private async waitForFlow(): Promise<void> {
+    if (!this.isX6h || !this.flowPaused) return;
+    await new Promise<void>(resolve => {
+      this.flowWaiters.push(resolve);
+    });
+  }
+
+  /**
+   * Sleep between scanline writes on X6 / X6h printers.
+   */
+  private async interPacketDelay(): Promise<void> {
+    const delay = this.options.interPacketDelayMs ?? 0;
+    if (delay <= 0) return;
+    await new Promise(resolve => setTimeout(resolve, delay));
   }
 
   /**

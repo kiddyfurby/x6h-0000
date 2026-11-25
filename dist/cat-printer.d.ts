@@ -12,6 +12,18 @@ export declare class CatPrinter {
     private options;
     private modelName;
     /**
+     * True when the connected device belongs to the X6 / X6h family, which
+     * needs flow control, a blank lead row, a 2-byte energy payload and a
+     * drain delay before disconnect.
+     */
+    private isX6h;
+    /**
+     * Flow-control gate for X6 / X6h. When the printer reports a full RX
+     * buffer, scanline writes wait until a "ready" notification arrives.
+     */
+    private flowPaused;
+    private flowWaiters;
+    /**
      * Creates an instance of the CatPrinter.
      * @param options Optional settings for the SDK.
      */
@@ -112,6 +124,12 @@ export declare class CatPrinter {
      */
     finish(feed?: number): Promise<void>;
     /**
+     * Lift the paper up to the tear line so it can be torn off.
+     * Feeds `tearFeed` scanlines (~15 mm at 203 dpi) at a slower speed.
+     * @returns A Promise that resolves when the tear feed is sent.
+     */
+    liftUpAndTear(): Promise<void>;
+    /**
      * Draw a single line of bitmap data to the printer.
      * @param line The bitmap line data as a Uint8Array.
      * @returns A Promise that resolves when the draw command is sent.
@@ -156,6 +174,15 @@ export declare class CatPrinter {
      */
     private textToBitmap;
     private imageToBitmap;
+    /**
+     * Wait until the printer signals it is ready (X6 / X6h flow control).
+     * Resolves immediately when the printer is not paused or not an X6.
+     */
+    private waitForFlow;
+    /**
+     * Sleep between scanline writes on X6 / X6h printers.
+     */
+    private interPacketDelay;
     /**
      * Log debug information to the console if debugging is enabled.
      * @param args Arguments to log.

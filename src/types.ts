@@ -22,6 +22,26 @@ export interface PrinterOptions {
    * Default number of lines to feed after printing.
    */
   finishFeed?: number;
+  /**
+   * Number of scanlines to feed for the "lift up and tear" action.
+   * Defaults to 120 (~15 mm at 203 dpi).
+   */
+  tearFeed?: number;
+  /**
+   * Force a specific printer model instead of auto-detecting from the
+   * advertised BLE name. Use `'x6'` for the X6 / X6h "cat printer" family.
+   */
+  model?: 'auto' | 'x6';
+  /**
+   * Milliseconds to keep the link open after the final feed so the printer
+   * can drain its buffer (X6 / X6h only). Defaults to 5000.
+   */
+  settleMs?: number;
+  /**
+   * Delay in milliseconds between scanline writes (X6 / X6h only).
+   * Defaults to 15.
+   */
+  interPacketDelayMs?: number;
 }
 
 /**
